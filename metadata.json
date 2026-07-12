@@ -1,0 +1,6 @@
+{
+  "name": "AI Outreach Platform",
+  "description": "An intelligent outreach dashboard that helps discover leads, analyze website SEO, and generate personalized AI email and LinkedIn outreach templates.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
