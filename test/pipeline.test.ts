@@ -1,24 +1,25 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-import { openDb } from '../server/db.ts';
 import { Store } from '../server/store.ts';
 import { crawlHomepage } from '../server/crawler.ts';
 import { runLeadPipeline } from '../server/pipeline.ts';
 import { startFixtureServer } from './testServer.ts';
+import { FakeRpcClient } from './fakeRpcClient.ts';
 import type { DraftResult } from '../server/types.ts';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const goodSitePath = path.join(here, 'fixtures', 'good-site.html');
 const messySitePath = path.join(here, 'fixtures', 'messy-plumber-site.html');
 
+// A fresh in-memory stand-in for the Supabase RPC surface (see
+// test/fakeRpcClient.ts) for each test — this sandbox has no outbound
+// internet and cannot reach the real Supabase project the app is deployed
+// against. See the report for what this does and doesn't prove.
 function freshStore(): Store {
-  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ai-outreach-test-')), 'test.sqlite');
-  return new Store(openDb({ file }));
+  return new Store(new FakeRpcClient());
 }
 
 // Allows the crawler to reach our local fixture server, which necessarily
@@ -46,7 +47,7 @@ test('happy path: crawl -> draft -> lead lands as drafted, registry updated', as
     assert.equal(outcome.kind, 'drafted');
     assert.equal(draftCalls, 1);
 
-    const lead = store.getLead((outcome as any).leadId);
+    const lead = await store.getLead((outcome as any).leadId);
     assert.equal(lead?.status, 'drafted');
     assert.ok(lead?.draftBody?.includes('Hi there'));
     assert.ok(lead?.draftBody?.includes('Test Studio'), 'compliance footer should include sender business name');
@@ -54,7 +55,7 @@ test('happy path: crawl -> draft -> lead lands as drafted, registry updated', as
     assert.ok(lead?.draftBody?.toLowerCase().includes('unsubscribe'));
     assert.equal(lead?.evidence?.emails[0], 'hello@acmebakery-test.com');
 
-    const registryEntry = store.getRegistryEntry(outcome.domain);
+    const registryEntry = await store.getRegistryEntry(outcome.domain);
     assert.equal(registryEntry?.status, 'drafted');
   } finally {
     await server.close();
@@ -96,8 +97,8 @@ test('a rejected lead also counts as covered and is not re-drafted later', async
   try {
     const first = await runLeadPipeline({ website: server.url, source: 'manual_url' }, deps);
     assert.equal(first.kind, 'drafted');
-    store.updateLead((first as any).leadId, { status: 'rejected' });
-    store.recordRegistryAction({ domain: first.domain, status: 'rejected' });
+    await store.updateLead((first as any).leadId, { status: 'rejected' });
+    await store.recordRegistryAction({ domain: first.domain, status: 'rejected' });
 
     const second = await runLeadPipeline({ website: server.url, source: 'auto_search' }, deps);
     assert.equal(second.kind, 'duplicate');
@@ -116,14 +117,14 @@ test('Gemini/draft failure produces a visible error, never fake content, and doe
   try {
     const outcome = await runLeadPipeline({ website: server.url, source: 'manual_url' }, deps);
     assert.equal(outcome.kind, 'draft_error');
-    const lead = store.getLead((outcome as any).leadId);
+    const lead = await store.getLead((outcome as any).leadId);
     assert.equal(lead?.status, 'draft_error');
     assert.equal(lead?.draftBody, null, 'must never contain a fallback/fake draft');
     assert.match(lead?.error || '', /GEMINI_API_KEY/);
 
     // A draft error must not mark the business as permanently covered —
     // it should be retryable once the real problem (e.g. missing key) is fixed.
-    assert.equal(store.isAlreadyCovered(outcome.domain), null);
+    assert.equal(await store.isAlreadyCovered(outcome.domain), null);
   } finally {
     await server.close();
   }
@@ -137,7 +138,7 @@ test('a crawl failure (site unreachable) is recorded with a visible error', asyn
 
   const outcome = await runLeadPipeline({ website: 'http://127.0.0.1:1', source: 'manual_url' }, deps);
   assert.equal(outcome.kind, 'crawl_error');
-  const lead = store.getLead((outcome as any).leadId);
+  const lead = await store.getLead((outcome as any).leadId);
   assert.equal(lead?.status, 'crawl_error');
   assert.ok(lead?.error);
 });
@@ -145,7 +146,7 @@ test('a crawl failure (site unreachable) is recorded with a visible error', asyn
 test('an opted-out contact email blocks drafting even though the crawl succeeds', async () => {
   const server = await startFixtureServer({ '/': { file: goodSitePath }, '/robots.txt': { status: 404, text: '' } });
   const store = freshStore();
-  store.addOptOut('hello@acmebakery-test.com');
+  await store.addOptOut('hello@acmebakery-test.com');
   let draftCalls = 0;
   const fakeDraft = async (): Promise<DraftResult> => {
     draftCalls++;

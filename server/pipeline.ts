@@ -48,12 +48,12 @@ export async function runLeadPipeline(input: PipelineInput, deps: PipelineDeps):
     throw new Error(`Invalid website "${input.website}": ${e.message || e}`);
   }
 
-  const alreadyCovered = store.isAlreadyCovered(domain);
+  const alreadyCovered = await store.isAlreadyCovered(domain);
   if (alreadyCovered) {
     return { kind: 'duplicate', leadId: null, domain, existingStatus: alreadyCovered.status };
   }
 
-  const business = store.upsertBusiness({
+  const business = await store.upsertBusiness({
     domain,
     website: normalizeUrl(input.website),
     name: input.businessName ?? null,
@@ -61,25 +61,25 @@ export async function runLeadPipeline(input: PipelineInput, deps: PipelineDeps):
     country: input.country ?? null,
   });
 
-  const leadId = store.createLead(business.id, input.source, 'crawling');
-  store.recordRegistryAction({ domain, businessName: input.businessName, status: 'crawling', city: input.city, country: input.country });
+  const leadId = await store.createLead(business.id, input.source, 'crawling');
+  await store.recordRegistryAction({ domain, businessName: input.businessName, status: 'crawling', city: input.city, country: input.country });
 
   const crawlResult = await crawl(business.website);
   if (!crawlResult.ok || !crawlResult.evidence) {
     const error = crawlResult.error || 'Unknown crawl error';
-    store.updateLead(leadId, { status: 'crawl_error', error });
-    store.recordRegistryAction({ domain, status: 'crawl_error' });
+    await store.updateLead(leadId, { status: 'crawl_error', error });
+    await store.recordRegistryAction({ domain, status: 'crawl_error' });
     return { kind: 'crawl_error', leadId, domain, error };
   }
 
-  store.updateLead(leadId, { evidence: crawlResult.evidence, status: 'drafting' });
+  await store.updateLead(leadId, { evidence: crawlResult.evidence, status: 'drafting' });
 
   // Opt-out check happens after crawling (we still want the evidence saved
   // for transparency) but strictly before drafting or contacting anyone.
   const contactEmail = crawlResult.evidence.emails[0];
-  if (contactEmail && store.isOptedOut(contactEmail)) {
-    store.updateLead(leadId, { status: 'opted_out', error: `${contactEmail} is on the do-not-contact list.` });
-    store.recordRegistryAction({ domain, status: 'opted_out' });
+  if (contactEmail && (await store.isOptedOut(contactEmail))) {
+    await store.updateLead(leadId, { status: 'opted_out', error: `${contactEmail} is on the do-not-contact list.` });
+    await store.recordRegistryAction({ domain, status: 'opted_out' });
     return { kind: 'opted_out', leadId, domain };
   }
 
@@ -92,15 +92,15 @@ export async function runLeadPipeline(input: PipelineInput, deps: PipelineDeps):
 
   if (!draftResult.ok || !draftResult.subject || !draftResult.body) {
     const error = draftResult.error || 'Unknown drafting error';
-    store.updateLead(leadId, { status: 'draft_error', error });
+    await store.updateLead(leadId, { status: 'draft_error', error });
     // Deliberately NOT recording this in the registry as "drafted" — a
     // failed draft attempt should not block a future retry.
     return { kind: 'draft_error', leadId, domain, error };
   }
 
   const finalBody = appendComplianceFooter(draftResult.body, deps.sender);
-  store.updateLead(leadId, { status: 'drafted', draftSubject: draftResult.subject, draftBody: finalBody, error: null });
-  store.recordRegistryAction({ domain, businessName: input.businessName || business.name, status: 'drafted', city: input.city, country: input.country });
+  await store.updateLead(leadId, { status: 'drafted', draftSubject: draftResult.subject, draftBody: finalBody, error: null });
+  await store.recordRegistryAction({ domain, businessName: input.businessName || business.name, status: 'drafted', city: input.city, country: input.country });
 
   return { kind: 'drafted', leadId, domain };
 }

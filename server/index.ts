@@ -1,11 +1,13 @@
 import path from 'node:path';
 import { App, dirnameOf } from './httpServer.ts';
-import { openDb } from './db.ts';
+import { createSupabaseRpcClient } from './supabaseClient.ts';
 import { Store } from './store.ts';
 import { registerRoutes } from './routes.ts';
 import { loadSenderProfileFromEnv } from './pipeline.ts';
 
 // Load .env without an extra dependency (dotenv). Simple key=value parser.
+// On Render (and most hosts) env vars are injected directly and there is
+// no .env file at all — that's fine, this just does nothing in that case.
 async function loadEnvFile() {
   try {
     const fs = await import('node:fs');
@@ -25,8 +27,8 @@ async function loadEnvFile() {
       if (process.env[key] === undefined) process.env[key] = value;
     }
   } catch {
-    // No .env file yet — fine, the user will be told what's missing when
-    // they try to draft or search.
+    // No .env file — fine locally (nothing configured yet) and expected
+    // on a host that injects env vars directly (e.g. Render).
   }
 }
 
@@ -34,20 +36,21 @@ async function main() {
   await loadEnvFile();
 
   const here = dirnameOf(import.meta.url);
-  const dbFile = process.env.DATABASE_FILE || path.join(here, '..', 'data', 'ai-outreach.sqlite');
-  const db = openDb({ file: dbFile });
-  const store = new Store(db);
+  const rpcClient = await createSupabaseRpcClient();
+  const store = new Store(rpcClient);
 
   const app = new App();
   app.serveStatic(path.join(here, '..', 'public'));
   registerRoutes(app, store, { sender: loadSenderProfileFromEnv() });
 
+  // Render (and most PaaS hosts) assign the port at runtime via $PORT and
+  // route their health check at /health — both are wired up above.
   const port = Number(process.env.PORT) || 3000;
   app.listen(port, () => {
-    console.log(`AI Outreach running at http://localhost:${port}`);
-    console.log(`Database: ${dbFile}`);
+    console.log(`AI Outreach running on port ${port}`);
+    console.log(`Supabase project: ${process.env.SUPABASE_URL || '(not set)'}`);
     if (!process.env.GEMINI_API_KEY) {
-      console.warn('GEMINI_API_KEY is not set — leads will crawl fine but drafting will fail with a clear error until you set it in .env.');
+      console.warn('GEMINI_API_KEY is not set — leads will crawl fine but drafting will fail with a clear error until you set it.');
     }
   });
 }

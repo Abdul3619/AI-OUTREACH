@@ -1,8 +1,10 @@
 # AI Outreach (v2)
 
-A small, local, single-user tool that finds real local businesses, audits
-their website, and drafts a personalized outreach email for you to review
-and send yourself. Nothing is ever sent automatically.
+A small, single-user tool that finds real local businesses, audits their
+website, and drafts a personalized outreach email for you to review and
+send yourself. Nothing is ever sent automatically. It's meant to be hosted
+(Render) so you just open a URL — no terminal, no local install, exactly
+like the portfolio and Agbada Luxe sites.
 
 This is a ground-up rewrite of the old `AI-OUTREACH` repo. The old code is
 kept for reference under [`legacy/`](./legacy) — see "Why a rewrite?" below.
@@ -37,52 +39,81 @@ kept for reference under [`legacy/`](./legacy) — see "Why a rewrite?" below.
 ## Coverage tracking (never contact the same business twice)
 
 Every business you've ever drafted, rejected, or contacted is recorded
-forever in one table (`registry`, keyed by domain), independent of which
-search or city it came from. Before drafting anything "new", the pipeline
-checks this table first — a duplicate is skipped and clearly flagged, never
-silently re-drafted. Every auto-search you run (city + category + date) is
-also recorded, and running the exact same search again warns you it's a
-repeat before it re-runs.
+forever in one table (`ai_outreach_registry`, keyed by domain), independent
+of which search or city it came from. Before drafting anything "new", the
+pipeline checks this table first — a duplicate is skipped and clearly
+flagged, never silently re-drafted. Every auto-search you run (city +
+category + date) is also recorded, and running the exact same search again
+warns you it's a repeat before it re-runs.
 
 This is what lets you expand across many cities and countries over time
 without keeping track of it yourself — the database is the memory.
 
-## Running it
+## Storage: Supabase Postgres, via RPC functions only
 
-**Requirements:** Node.js **22.5 or newer** (needed for `node:sqlite`, which
-this app uses instead of an external database — no separate Postgres/Supabase
-setup, and nothing new to host).
+This app stores everything in the **same Supabase project already used by
+the portfolio and Agbada Luxe sites** (this account is capped at 2 free
+projects) — not a new one. Its tables all live under a distinct
+`ai_outreach_` prefix so they never collide with the existing `agbada_`
+tables.
 
-```bash
-cd ai-outreach
-npm install
-cp .env.example .env
-```
+The security model matches what's already proven on Agbada Luxe: every
+`ai_outreach_*` table has **Row Level Security enabled with zero direct
+policies** — meaning nothing, including the app itself, can `SELECT`,
+`INSERT`, `UPDATE`, or `DELETE` a row directly. The only way in is through a
+fixed set of narrow `SECURITY DEFINER` Postgres functions (`ai_outreach_upsert_business`,
+`ai_outreach_record_action`, `ai_outreach_add_optout`, etc. — see
+[`supabase/migration.sql`](./supabase/migration.sql) for the full list),
+each of which validates its own inputs and does exactly one named thing.
+`EXECUTE` on those specific functions is granted to the `anon` role — and
+**that's the only credential this app ever holds** (`SUPABASE_ANON_KEY`).
+It never has, and never needs, the service-role secret key. If the anon key
+ever leaked, the worst it could do is call these same narrow functions —
+never run an arbitrary query against the tables.
 
-Then edit `.env`:
-- `GEMINI_API_KEY` — get a free key at https://aistudio.google.com/apikey.
-  Without this, everything else works (crawling, CSV import, auto-search,
+`server/store.ts` only ever calls `.rpc(...)`; there is no direct table
+query anywhere in the app.
+
+## Running it (hosted — this is how it's meant to be used)
+
+This app is meant to run as a long-lived web service (e.g. Render), not on
+your own machine. Nothing to install, no terminal — you just open the URL
+once it's deployed. What you (the user) need to provide, when asked, is:
+
+- A **Gemini API key** — get a free one at https://aistudio.google.com/apikey.
+  Without it, everything else works (crawling, CSV import, auto-search,
   coverage tracking) but drafting will show a clear error instead of a draft.
-- `GEMINI_MODEL` — defaults to a current model, but Google renames/retires
-  Gemini models fairly often. Before relying on this, check
-  https://ai.google.dev/gemini-api/docs/models and update `.env` if needed.
-- `SENDER_BUSINESS_NAME` / `SENDER_ADDRESS` — your real business name and
-  mailing address. These go in the compliance footer on every drafted email.
-- `OSM_CONTACT_EMAIL` — your email, sent as a courtesy identifier on
-  OpenStreetMap API requests (their usage policy asks for this).
+- Your real **business name and mailing address**, for the compliance
+  footer that goes on every drafted email.
+- Whatever OpenStreetMap asks for (just an email address, for their
+  request-identification policy — not a secret).
 
-Start it:
+Everything else (creating the Supabase tables, wiring up environment
+variables, deploying the service) is infrastructure work done once during
+setup — you shouldn't need to touch a terminal for normal use afterward.
 
-```bash
-npm start          # or: npm run dev   (auto-restarts on file changes)
-```
+### For whoever deploys it (reference — not needed for day-to-day use)
 
-Then open **http://localhost:3000** in your browser. That's the whole app —
-one page with three tabs (Add Leads / Review Queue / Coverage).
+Environment variables the running service needs:
 
-Your data lives in a single SQLite file at `data/ai-outreach.sqlite`
-(created automatically). Back it up like any other file if you care about
-not losing it — there's no cloud copy.
+| Variable | Where it comes from |
+|---|---|
+| `SUPABASE_URL` | The existing shared Supabase project's URL |
+| `SUPABASE_ANON_KEY` | That project's **public anon/publishable key only** — never the service-role key |
+| `GEMINI_API_KEY` | https://aistudio.google.com/apikey |
+| `GEMINI_MODEL` | Defaults to a current model in `.env.example`; verify against https://ai.google.dev/gemini-api/docs/models |
+| `SENDER_BUSINESS_NAME` / `SENDER_ADDRESS` | The user's real business details, for the compliance footer |
+| `OSM_CONTACT_EMAIL` | A real contact email, per Nominatim's usage policy |
+| `PORT` | Set automatically by Render — don't set this manually there |
+
+The schema + RPC functions in `supabase/migration.sql` must be applied to
+that Supabase project before the app can do anything (see the comment block
+at the top of that file for exactly why RLS + no-policies + SECURITY
+DEFINER is safe here, and who needs to run it).
+
+For local development only (optional, not needed for normal use): `npm
+install`, `cp .env.example .env`, fill it in, then `npm start` or `npm run
+dev`, and open `http://localhost:3000`. Requires Node.js 22.5+.
 
 ## Running the tests
 
@@ -91,10 +122,10 @@ npm test
 ```
 
 This runs 31 tests, including a full end-to-end run of the real pipeline
-(crawl → dedupe check → draft → save) against a local test HTTP server, and
-a test that specifically proves a business already drafted/rejected/sent is
-never re-drafted on a second pass. See "What was actually tested" below for
-exactly what this does and doesn't cover.
+(crawl → dedupe check → draft → save) against a local test HTTP server and
+an in-memory stand-in for the Supabase RPC layer (see "What was actually
+tested" below for why), and a test that specifically proves a business
+already drafted/rejected/sent is never re-drafted on a second pass.
 
 ## Compliance — read this before emailing real people
 
@@ -168,30 +199,36 @@ the tests proving this actually blocks a request.
 
 ## What was actually tested for real vs. what could not be
 
-This sandbox had **no outbound internet access** (no npm registry, no
-GitHub API, no OpenStreetMap, no Gemini API — all blocked at the network
-boundary) and could not install any npm packages. Given that, the app was
-deliberately built to need **zero external npm packages for anything except
-drafting** (only `@google/genai` is a real dependency, and it's imported
-lazily only inside the draft call) — everything else uses Node's own
-built-ins (`node:http`, `node:sqlite`, `fetch`, `node:dns`). That let me
-actually run almost the whole thing for real in this sandbox instead of
-just reading the code:
+This sandbox had **no outbound internet access at all** (no npm registry,
+no GitHub API beyond the one repo explicitly attached, no OpenStreetMap, no
+Gemini API, no Supabase — all blocked at the network boundary) and could
+not install any npm packages. Given that, the app was deliberately built so
+that `server/store.ts` (all database logic) depends on nothing but a
+one-method `RpcClient` interface (`rpc(fnName, params)`), never on
+`@supabase/supabase-js` directly — the real Supabase client is only ever
+constructed in `server/supabaseClient.ts`, imported solely from
+`server/index.ts`. That let the test suite exercise the exact same
+`Store`/pipeline logic the deployed app runs, against `test/fakeRpcClient.ts`
+— an in-memory implementation of the **same function names and the same
+business rules** as `supabase/migration.sql` (status-rank merging, domain
+normalization, the permanent opt-out list) — instead of just reading the
+code.
 
 **Actually run and verified, for real, in this sandbox:**
-- The real server boots (`npm start` equivalent), serves the frontend, and
-  answers every API route.
+- The real HTTP server (`server/httpServer.ts` + `routes.ts`) boots, serves
+  the frontend, and answers every API route including `/health`, run
+  end-to-end via `curl` against a real running process (not just unit
+  tests) — see the transcript in this session.
 - The real crawler (robots.txt parsing, HTML signal extraction, the fixed
   email-parsing logic, HTTP fetch with timeout/redirect handling) against a
   real local HTTP test server serving two fixture pages (one messy, one
   well-built) — not mocked.
 - The real SSRF guard, hit through the real running HTTP server: a request
   to `http://localhost:3777/` was actually refused end-to-end, not just
-  unit-tested in isolation (see the curl transcript this was verified with,
-  reproduced in the PR/commit description).
-- The full pipeline (crawl → coverage-registry check → draft → persist to a
-  real SQLite file) end-to-end, with a stand-in draft function standing in
-  for the real Gemini call (see below for why).
+  unit-tested in isolation.
+- The full pipeline (crawl → coverage-registry check → draft → persist)
+  end-to-end against the in-memory RPC stand-in, with a stand-in draft
+  function standing in for the real Gemini call (see below for why).
 - The specific duplicate-prevention requirement: running the pipeline twice
   against the same business (from two different "cities", simulating
   expansion over time) drafts it once and skips/flags the second time,
@@ -201,34 +238,46 @@ just reading the code:
   **not** get marked as permanently covered, so it can be retried.
 - CSV parsing, the Overpass query builder (correct OSM tags + bounding box +
   required `website` tag), and robots.txt parsing, each with dedicated tests.
+- Confirmed `server/index.ts` reads `process.env.PORT` (Render sets this
+  itself) and fails with one clear error message, rather than crashing
+  confusingly, when `SUPABASE_URL`/`SUPABASE_ANON_KEY` aren't set.
 - 31 tests total, `npm test`, all passing.
 
-**Could not be tested for real, and why — you should verify these once you
-have internet and a key:**
+**Could not be tested for real, and why — this is the orchestrator's side
+of this split (real infra access) to verify once applied/deployed:**
+- **The real `supabase/migration.sql` against an actual Postgres database.**
+  This sandbox cannot reach Supabase at all. The SQL was written carefully
+  (validated inputs, `SET search_path = public` on every `SECURITY DEFINER`
+  function, RLS enabled with zero policies, explicit `REVOKE ALL` on top of
+  that) and its logic is mirrored exactly in `test/fakeRpcClient.ts`, which
+  is what the test suite actually runs against — but the SQL itself has
+  never executed against a real Postgres instance. **After applying it,
+  run one lead through `/api/leads/url` for real and check the resulting
+  rows in the Supabase table editor before trusting it at volume**, and
+  specifically confirm the functions are owned by a role that bypasses RLS
+  (see the note at the top of the migration file) — if they aren't, every
+  RPC call will silently return nothing instead of erroring clearly.
 - **A real Gemini API call.** No API key was available and the sandbox
   could not reach `generativelanguage.googleapis.com` at all. The
   request/response shape in `server/gemini.ts` matches the `@google/genai`
   SDK's documented `generateContent` call, and the failure-handling path
-  (no fake fallback, ever) was tested with a stand-in function that mimics
-  both a success and a failure response — but the real network call itself
-  was never made. **Try one real lead through the UI first** after adding
-  your key, before trusting it for anything at scale.
-- **The exact current Gemini model name.** I verified via web search (not
-  a live API call) that `gemini-3-flash-preview` is a real, current model
-  ID as of when this was built, but Google's model lineup changes often —
-  double-check `.env`'s `GEMINI_MODEL` against
-  https://ai.google.dev/gemini-api/docs/models before relying on this.
+  (no fake fallback, ever) was tested with a stand-in function — but the
+  real network call itself was never made. **Try one real lead through the
+  UI first** after the key is set, before trusting it at scale.
+- **The exact current Gemini model name.** Verified via web search (not a
+  live API call) that `gemini-3-flash-preview` is a real, current model ID
+  as of when this was built, but Google's model lineup changes often —
+  double-check against https://ai.google.dev/gemini-api/docs/models.
 - **A real OpenStreetMap auto-search** (Nominatim geocoding + Overpass
   query). The sandbox's network proxy explicitly blocked
   `overpass-api.de`. The query-building logic is unit-tested and the HTTP
   call code is straightforward `fetch()`, but a real end-to-end search was
-  never run. Try a small city+category search first and sanity-check the
-  results before running a large one.
-- `npm install` itself was never run in this sandbox (the npm registry was
-  also blocked) — the dependency versions in `package.json` are carried
-  over from what the old repo had already pinned (for `@google/genai`) or
-  are ordinary, unpinned-to-a-specific-patch ranges; run `npm install`
-  yourself and it should resolve normally on a machine with real internet.
+  never run.
+- **`npm install` and an actual deploy.** The npm registry was blocked in
+  this sandbox too — dependency versions in `package.json` are carried over
+  from what the old repo had already pinned (`@google/genai`,
+  `@supabase/supabase-js`) or are ordinary unpinned ranges; they should
+  resolve normally with real internet, but that was never confirmed here.
 
 ## Why a rewrite instead of fixing the old repo?
 
@@ -262,24 +311,27 @@ neither can be committed again by accident.
 
 ```
 server/
-  index.ts        entry point — loads .env, opens the DB, starts the server
-  httpServer.ts   tiny router + static file server (no Express)
-  routes.ts       the JSON API
-  pipeline.ts     crawl -> dedupe-check -> draft -> persist, for one lead
-  crawler.ts      fetches a homepage (robots.txt, timeout, SSRF guard)
-  htmlExtract.ts  pulls audit signals out of raw HTML (the fixed email bug)
-  security.ts     the SSRF guard
-  robots.ts       tiny robots.txt parser
-  gemini.ts       one Gemini call per lead; never a fake fallback
-  compliance.ts   the footer + opt-out honoring
-  overpass.ts     OpenStreetMap auto-search (Nominatim + Overpass)
-  db.ts           SQLite schema (node:sqlite)
-  store.ts        all database queries, including the coverage registry
-  csv.ts          tiny CSV parser
-  types.ts        shared types
+  index.ts          entry point — loads env, connects to Supabase, starts the server
+  httpServer.ts     tiny router + static file server (no Express)
+  routes.ts         the JSON API, including /health for Render's health check
+  pipeline.ts       crawl -> dedupe-check -> draft -> persist, for one lead
+  crawler.ts        fetches a homepage (robots.txt, timeout, SSRF guard)
+  htmlExtract.ts    pulls audit signals out of raw HTML (the fixed email bug)
+  security.ts       the SSRF guard
+  robots.ts         tiny robots.txt parser
+  gemini.ts         one Gemini call per lead; never a fake fallback
+  compliance.ts     the footer + opt-out honoring
+  overpass.ts       OpenStreetMap auto-search (Nominatim + Overpass)
+  supabaseClient.ts builds the real Supabase RPC client (anon key only)
+  store.ts          all data access, purely via .rpc() calls — no direct table queries
+  csv.ts            tiny CSV parser
+  types.ts          shared types
 public/
   index.html, app.js, style.css     the whole frontend, no build step
+supabase/
+  migration.sql     tables + RLS + SECURITY DEFINER RPC functions — apply this once
 test/
-  *.test.ts       31 tests, run with `npm test`
-legacy/            the old repo, kept for reference
+  *.test.ts         31 tests, run with `npm test`
+  fakeRpcClient.ts  in-memory stand-in for the Supabase RPC surface, used by tests
+legacy/              the old repo, kept for reference
 ```
