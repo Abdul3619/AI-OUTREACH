@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AI Outreach</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>AI Outreach</h1>
+    <nav>
+      <button data-tab="add" class="tab active">Add Leads</button>
+      <button data-tab="review" class="tab">Review Queue</button>
+      <button data-tab="coverage" class="tab">Coverage</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="tab-add" class="panel">
+      <div class="card">
+        <h2>Paste a website</h2>
+        <form id="url-form">
+          <input type="text" id="url-input" placeholder="e.g. joesplumbing.com" required />
+          <input type="text" id="url-name" placeholder="Business name (optional)" />
+          <button type="submit">Run pipeline</button>
+        </form>
+        <p id="url-result" class="result"></p>
+      </div>
+
+      <div class="card">
+        <h2>Import a CSV</h2>
+        <p class="hint">Columns recognized: <code>website</code> (or <code>url</code>), <code>name</code>, <code>city</code>, <code>country</code>. One row per business.</p>
+        <input type="file" id="csv-file" accept=".csv,text/csv" />
+        <button id="csv-submit">Import &amp; run pipeline</button>
+        <p id="csv-result" class="result"></p>
+      </div>
+
+      <div class="card">
+        <h2>Auto-search (OpenStreetMap)</h2>
+        <form id="search-form">
+          <input type="text" id="search-city" placeholder="City, e.g. Lagos, Nigeria" required />
+          <input type="text" id="search-category" placeholder="Category, e.g. plumbers" required />
+          <button type="submit">Search &amp; run pipeline</button>
+        </form>
+        <p class="hint">Known categories: <span id="known-categories"></span> — anything else falls back to a name match.</p>
+        <p id="search-result" class="result"></p>
+      </div>
+    </section>
+
+    <section id="tab-review" class="panel hidden">
+      <div class="toolbar">
+        <label>Status:
+          <select id="status-filter">
+            <option value="">All</option>
+            <option value="drafted">Drafted (needs review)</option>
+            <option value="crawl_error">Crawl error</option>
+            <option value="draft_error">Draft error</option>
+            <option value="opted_out">Opted out</option>
+            <option value="approved">Approved</option>
+            <option value="rejected">Rejected</option>
+            <option value="sent">Sent</option>
+          </select>
+        </label>
+        <button id="refresh-leads">Refresh</button>
+      </div>
+      <div id="leads-list"></div>
+    </section>
+
+    <section id="tab-coverage" class="panel hidden">
+      <div class="card" id="coverage-stats"></div>
+      <div class="card">
+        <h2>Search history</h2>
+        <table id="search-history"><thead><tr><th>City</th><th>Category</th><th>Date</th><th>Results</th></tr></thead><tbody></tbody></table>
+      </div>
+      <div class="card">
+        <h2>Do-not-contact list</h2>
+        <form id="optout-form">
+          <input type="email" id="optout-email" placeholder="email@example.com" required />
+          <button type="submit">Add to opt-out list</button>
+        </form>
+        <ul id="optout-list"></ul>
+      </div>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
