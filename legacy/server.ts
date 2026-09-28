@@ -65,7 +65,7 @@ async function startServer() {
         imgSrc: ["'self'", "data:", "https:", "http:", "referrerpolicy:"],
         fontSrc: ["'self'", "https:", "http:", "data:", "https://fonts.gstatic.com"],
         connectSrc: ["'self'", "https:", "http:", "wss:", "ws:"],
-        frameAncestors: ["'self'", "https:", "http:"], // Allows rendering in AI Studio frames
+        frameAncestors: ["'self'", "https:", "http:"],
       }
     },
     crossOriginEmbedderPolicy: false,
