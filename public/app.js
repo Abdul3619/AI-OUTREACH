@@ -19,6 +19,11 @@ $$('.tab').forEach((btn) => {
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
+  // Session expired or missing: go back to the login page
+  if (res.status === 401) {
+    window.location.href = '/login';
+    throw new Error('Please log in.');
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
@@ -301,4 +306,9 @@ $('#optout-form').addEventListener('submit', async (e) => {
   });
   $('#optout-email').value = '';
   loadCoverage();
+});
+
+document.getElementById('logout-btn')?.addEventListener('click', async () => {
+  await fetch('/api/logout', { method: 'POST' }).catch(() => {});
+  window.location.href = '/login';
 });

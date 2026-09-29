@@ -33,8 +33,15 @@ export async function createSupabaseRpcClient(): Promise<RpcClient> {
     throw new Error(`@supabase/supabase-js is not installed. Run "npm install" first. (${e.message || e})`);
   }
 
+  // Every ai_outreach_* function refuses to run unless this header carries the server key (see
+  // supabase/002_require_server_key.sql), so the public anon key on its own can no longer read or change anything.
+  const serverKey = process.env.AI_OUTREACH_DB_KEY;
+  if (!serverKey) {
+    throw new Error('AI_OUTREACH_DB_KEY must be set (see .env.example). The database functions reject calls without it.');
+  }
   const client = createClient(url, anonKey, {
     auth: { persistSession: false },
+    global: { headers: { 'x-ai-outreach-key': serverKey } },
   });
 
   return {

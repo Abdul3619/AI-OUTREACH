@@ -7,6 +7,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { Auth, isPublicPath } from './auth.ts';
 
 export type Handler = (req: http.IncomingMessage, res: http.ServerResponse, params: Record<string, string>, body: any) => void | Promise<void>;
 
@@ -29,6 +30,12 @@ const CONTENT_TYPES: Record<string, string> = {
 export class App {
   private routes: Route[] = [];
   private staticDir: string | null = null;
+  private auth: Auth | null = null;
+
+  // Every route and static file except the public ones (see auth.ts) then requires a logged-in session.
+  useAuth(auth: Auth) {
+    this.auth = auth;
+  }
 
   route(method: string, path: string, handler: Handler) {
     const paramNames: string[] = [];
@@ -81,7 +88,8 @@ export class App {
 
   private async tryStatic(urlPath: string, res: http.ServerResponse): Promise<boolean> {
     if (!this.staticDir) return false;
-    const safePath = path.normalize(urlPath === '/' ? '/index.html' : urlPath).replace(/^(\.\.[/\\])+/, '');
+    const mapped = urlPath === '/' ? '/index.html' : urlPath === '/login' ? '/login.html' : urlPath;
+    const safePath = path.normalize(mapped).replace(/^(\.\.[/\\])+/, '');
     const filePath = path.join(this.staticDir, safePath);
     if (!filePath.startsWith(this.staticDir)) return false;
     try {
@@ -100,6 +108,25 @@ export class App {
       try {
         const url = new URL(req.url || '/', 'http://localhost');
         const method = req.method || 'GET';
+        res.setHeader('X-Content-Type-Options', 'nosniff');
+        res.setHeader('X-Frame-Options', 'DENY');
+        res.setHeader('Referrer-Policy', 'same-origin');
+
+        if (this.auth && !isPublicPath(url.pathname) && !this.auth.isAuthenticated(req)) {
+          if (!this.auth.configured) {
+            res.writeHead(503, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Login is not configured: set APP_PASSWORD (at least 12 characters) on the server.' }));
+            return;
+          }
+          if (url.pathname.startsWith('/api/')) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Please log in.' }));
+            return;
+          }
+          res.writeHead(302, { Location: '/login' });
+          res.end();
+          return;
+        }
 
         for (const route of this.routes) {
           if (route.method !== method) continue;
