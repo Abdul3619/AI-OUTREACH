@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Log in · AI Outreach</title>
+  <meta name="robots" content="noindex" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="/style.css" />
+  <style>
+    .login { max-width: 360px; margin: 12vh auto; padding: 0 16px; }
+    .login form { display: flex; flex-direction: column; gap: 12px; }
+    .login label { font-size: 14px; }
+    .login .error { color: #ff8a8a; min-height: 1.4em; margin: 0; }
+  </style>
+</head>
+<body>
+  <main class="login">
+    <div class="card">
+      <h1>AI Outreach</h1>
+      <p>This tool is private. Enter the password to continue.</p>
+      <form id="login-form">
+        <label for="password">Password</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" required autofocus />
+        <button type="submit">Log in</button>
+        <p id="login-error" class="error" role="alert"></p>
+      </form>
+    </div>
+  </main>
+  <script>
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const error = document.getElementById('login-error');
+      error.textContent = '';
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: document.getElementById('password').value }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok) { window.location.href = '/'; return; }
+        error.textContent = data.error || 'Could not log in.';
+      } catch {
+        error.textContent = 'Could not reach the server.';
+      }
+    });
+  </script>
+</body>
+</html>

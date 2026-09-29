@@ -4,6 +4,8 @@ import { createSupabaseRpcClient } from './supabaseClient.ts';
 import { Store } from './store.ts';
 import { registerRoutes } from './routes.ts';
 import { loadSenderProfileFromEnv } from './pipeline.ts';
+import { Auth } from './auth.ts';
+import { registerAuthRoutes } from './authRoutes.ts';
 
 // Load .env without an extra dependency (dotenv). Simple key=value parser.
 // On Render (and most hosts) env vars are injected directly and there is
@@ -40,7 +42,15 @@ async function main() {
   const store = new Store(rpcClient);
 
   const app = new App();
+  const auth = new Auth({
+    password: process.env.APP_PASSWORD,
+    sessionSecret: process.env.SESSION_SECRET,
+    secureCookie: process.env.INSECURE_COOKIES !== 'true',
+  });
+  if (!auth.configured) console.warn('APP_PASSWORD is not set (or shorter than 12 characters): the app is locked until it is.');
+  app.useAuth(auth);
   app.serveStatic(path.join(here, '..', 'public'));
+  registerAuthRoutes(app, auth);
   registerRoutes(app, store, { sender: loadSenderProfileFromEnv() });
 
   // Render (and most PaaS hosts) assign the port at runtime via $PORT and

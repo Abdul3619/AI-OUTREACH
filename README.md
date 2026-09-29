@@ -36,9 +36,23 @@ It needs Node.js 22.5 or newer.
 | `OSM_CONTACT_EMAIL` | A real contact email, required by OpenStreetMap's usage policy |
 | `PORT` | Defaults to 3000. Render sets it automatically. |
 
-Before first use, apply [`supabase/migration.sql`](./supabase/migration.sql) to the Supabase project.
+Before first use, apply [`supabase/migration.sql`](./supabase/migration.sql) and then [`supabase/002_require_server_key.sql`](./supabase/002_require_server_key.sql) to the Supabase project, and store the hash of `AI_OUTREACH_DB_KEY` as described at the top of that file.
 
-**Important before hosting it publicly:** the app has no login yet. Anyone who finds the URL could run searches on my Gemini key or change the do-not-contact list, so it needs password protection before it goes on a public host.
+### Login and access control
+
+The whole app is behind a password. Set these on the host as well:
+
+| Variable | What it is |
+|---|---|
+| `APP_PASSWORD` | The login password (at least 12 characters). Without it the app stays locked. |
+| `SESSION_SECRET` | At least 32 random characters, used to sign the login cookie. |
+| `AI_OUTREACH_DB_KEY` | A long random key the server sends with every database call. |
+
+The database is locked to the server too: every `ai_outreach_*` function checks the `x-ai-outreach-key` header
+against a hash stored in `ai_outreach_config` (see [`supabase/002_require_server_key.sql`](./supabase/002_require_server_key.sql)),
+so the public anon key on its own can no longer read leads or change the do-not-contact list.
+
+Logins are rate limited (5 failed attempts per address per 15 minutes) and sessions last 12 hours.
 
 ## How the data is stored
 
